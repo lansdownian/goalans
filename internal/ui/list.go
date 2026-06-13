@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/lansdownian/goalans/internal/api"
@@ -31,7 +32,26 @@ func (m MatchItem) Title() string {
 }
 
 func (m MatchItem) Description() string {
-	return DimStyle().Render(m.Match.League.Name)
+	desc := m.Match.League.Name
+	if m.Match.MatchTime != nil {
+		desc += " · " + formatMatchDate(*m.Match.MatchTime)
+	}
+	return DimStyle().Render(desc)
+}
+
+func formatMatchDate(t time.Time) string {
+	now := time.Now()
+	local := t.In(now.Location())
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	matchDay := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, now.Location())
+	switch {
+	case matchDay.Equal(today):
+		return "Today"
+	case matchDay.Equal(today.AddDate(0, 0, -1)):
+		return "Yesterday"
+	default:
+		return local.Format("Mon 2 Jan")
+	}
 }
 
 func ToListItems(matches []api.Match) []list.Item {

@@ -36,7 +36,7 @@ func RenderMatchView(width, height int, title string, matchList list.Model, deta
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 	header := design.RenderHeaderCentered("Goalans", width-2)
-	help := menuHelp.Render("↑/↓ j/k · / filter · esc back · q quit")
+	help := menuHelp.Render("↑/↓ j/k · enter select · / filter · esc back · q quit")
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, help)
 }
@@ -54,6 +54,9 @@ func renderDetails(details *api.MatchDetails, loading bool, lastError string, sp
 
 	var b strings.Builder
 	status := string(details.Status)
+	if details.Status == api.MatchStatusFinished {
+		status = "FT"
+	}
 	if details.LiveTime != nil && *details.LiveTime != "" {
 		status = *details.LiveTime
 	}
@@ -109,6 +112,9 @@ func renderDetails(details *api.MatchDetails, loading bool, lastError string, sp
 	}
 	if loading {
 		b.WriteString("\n" + neonDimStyle.Render("Updating…") + " " + sp.View())
+	}
+	if lastError != "" {
+		b.WriteString("\n\n" + ErrorStyle().Render("Could not load full details: "+lastError))
 	}
 	return b.String()
 }

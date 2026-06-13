@@ -4,8 +4,8 @@ A terminal app for following football (soccer) matches — live scores, today's 
 
 ## What it provides
 
-- **Live Matches** — currently in-play games across top European leagues
-- **Finished Today** — full-time results from today
+- **Live Matches** — currently in-play games across top European leagues and World Cup
+- **Recent Results** — finished matches from the last 14 days (includes World Cup)
 - **World Cup 2026** — group standings and knockout bracket (USA / Mexico / Canada)
 - **Match details** — score, venue, referee, goal/card events, key stats
 - **Live polling** — selected live matches refresh every 90 seconds
@@ -14,7 +14,7 @@ A terminal app for following football (soccer) matches — live scores, today's 
 
 ### Leagues covered (default)
 
-Premier League, La Liga, Bundesliga, Serie A, Ligue 1
+Premier League, La Liga, Bundesliga, Serie A, Ligue 1, FIFA World Cup
 
 Data is fetched from public FotMob league and match pages.
 
@@ -81,7 +81,7 @@ Goalans/
 ## Notes
 
 - Match details for live/network mode require selecting a match from the list first (the app stores the FotMob page URL from the list fetch).
-- If the match list is empty, there may simply be no live or finished games today in the tracked leagues.
+- If the match list is empty, there may simply be no live or recent finished games in the tracked leagues.
 - FotMob HTML structure can change; if fetches fail, use `--mock` to verify the app itself is working.
 
 ## License

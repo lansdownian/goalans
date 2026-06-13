@@ -44,8 +44,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.matchList.SetItems(ui.ToListItems(msg.matches))
 		if len(msg.matches) > 0 {
 			m.matchList.Select(0)
-			cmds = append(cmds, fetchMatchDetails(m.client, msg.matches[0].ID, m.useMock))
+			m.matchDetails = previewDetails(msg.matches[0])
 			m.loading = true
+			cmds = append(cmds, fetchMatchDetails(m.client, msg.matches[0].ID, m.useMock))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -53,7 +54,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.err != nil {
 			m.lastError = msg.err.Error()
-			m.matchDetails = nil
 			return m, nil
 		}
 		m.lastError = ""
@@ -113,9 +113,8 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.matchList, cmd = m.matchList.Update(msg)
-		if id, ok := m.selectedMatchID(); ok {
-			m.loading = true
-			return m, tea.Batch(cmd, fetchMatchDetails(m.client, id, m.useMock))
+		if match, ok := m.selectedMatch(); ok {
+			return m.selectMatch(match, cmd)
 		}
 		return m, cmd
 
@@ -128,13 +127,20 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.matchList, cmd = m.matchList.Update(msg)
-		if id, ok := m.selectedMatchID(); ok {
-			m.loading = true
-			return m, tea.Batch(cmd, fetchMatchDetails(m.client, id, m.useMock))
+		if match, ok := m.selectedMatch(); ok {
+			return m.selectMatch(match, cmd)
 		}
 		return m, cmd
 
 	case "enter":
+		if m.currentView == viewLive || m.currentView == viewFinished {
+			var cmd tea.Cmd
+			m.matchList, cmd = m.matchList.Update(msg)
+			if match, ok := m.selectedMatch(); ok {
+				return m.selectMatch(match, cmd)
+			}
+			return m, cmd
+		}
 		if m.currentView == viewMenu {
 			m.loading = true
 			m.lastError = ""
@@ -169,14 +175,35 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) selectedMatchID() (int, bool) {
-	item := m.matchList.SelectedItem()
-	if item == nil {
+	match, ok := m.selectedMatch()
+	if !ok {
 		return 0, false
 	}
-	if mi, ok := item.(ui.MatchItem); ok {
-		return mi.ID, true
+	return match.ID, true
+}
+
+func (m model) selectedMatch() (api.Match, bool) {
+	item := m.matchList.SelectedItem()
+	if item == nil {
+		return api.Match{}, false
 	}
-	return 0, false
+	if mi, ok := item.(ui.MatchItem); ok {
+		return mi.Match, true
+	}
+	return api.Match{}, false
+}
+
+func (m model) selectMatch(match api.Match, listCmd tea.Cmd) (tea.Model, tea.Cmd) {
+	m.lastError = ""
+	m.matchDetails = previewDetails(match)
+	m.loading = true
+	m.polling = false
+	m.pollGen++
+	return m, tea.Batch(listCmd, fetchMatchDetails(m.client, match.ID, m.useMock))
+}
+
+func previewDetails(match api.Match) *api.MatchDetails {
+	return &api.MatchDetails{Match: match}
 }
 
 func (m *model) resizeList() {
@@ -205,7 +232,7 @@ func (m model) View() string {
 		m.resizeList()
 		title := "Live Matches"
 		if m.currentView == viewFinished {
-			title = "Finished Today"
+			title = "Recent Results"
 		}
 		return ui.RenderMatchView(m.width, m.height, title, m.matchList, m.matchDetails, m.spinner, m.loading, m.lastError, m.polling)
 	}

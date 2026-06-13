@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +17,10 @@ import (
 	"github.com/lansdownian/goalans/internal/data"
 )
 
-const baseURL = "https://www.fotmob.com"
+const (
+	baseURL          = "https://www.fotmob.com"
+	finishedDaysBack = 14
+)
 
 var nextDataRe = regexp.MustCompile(`<script id="__NEXT_DATA__" type="application/json">(.+?)</script>`)
 
@@ -56,7 +61,10 @@ func (c *Client) getPageURL(matchID int) string {
 }
 
 func (c *Client) MatchesForDate(ctx context.Context, date time.Time, wantLive, wantFinished bool) ([]api.Match, error) {
-	dateStr := date.UTC().Format("2006-01-02")
+	return c.MatchesInRange(ctx, date, date, wantLive, wantFinished)
+}
+
+func (c *Client) MatchesInRange(ctx context.Context, from, to time.Time, wantLive, wantFinished bool) ([]api.Match, error) {
 	var mu sync.Mutex
 	var all []api.Match
 	var wg sync.WaitGroup
@@ -68,7 +76,7 @@ func (c *Client) MatchesForDate(ctx context.Context, date time.Time, wantLive, w
 			c.maxConcurrent <- struct{}{}
 			defer func() { <-c.maxConcurrent }()
 
-			matches, err := c.leagueMatchesForDate(ctx, id, dateStr, wantLive, wantFinished)
+			matches, err := c.leagueMatchesInRange(ctx, id, from, to, wantLive, wantFinished)
 			if err != nil || len(matches) == 0 {
 				return
 			}
@@ -81,7 +89,7 @@ func (c *Client) MatchesForDate(ctx context.Context, date time.Time, wantLive, w
 	return all, nil
 }
 
-func (c *Client) leagueMatchesForDate(ctx context.Context, leagueID int, dateStr string, wantLive, wantFinished bool) ([]api.Match, error) {
+func (c *Client) leagueMatchesInRange(ctx context.Context, leagueID int, from, to time.Time, wantLive, wantFinished bool) ([]api.Match, error) {
 	props, err := fetchLeaguePage(ctx, c.httpClient, leagueID)
 	if err != nil {
 		return nil, err
@@ -89,9 +97,9 @@ func (c *Client) leagueMatchesForDate(ctx context.Context, leagueID int, dateStr
 
 	var resp struct {
 		Details struct {
-			ID      int    `json:"id"`
-			Name    string `json:"name"`
-			Country string `json:"country"`
+			ID      flexInt `json:"id"`
+			Name    string  `json:"name"`
+			Country string  `json:"country"`
 		} `json:"details"`
 		Fixtures struct {
 			AllMatches []rawMatch `json:"allMatches"`
@@ -103,7 +111,7 @@ func (c *Client) leagueMatchesForDate(ctx context.Context, leagueID int, dateStr
 
 	out := make([]api.Match, 0, 8)
 	for _, m := range resp.Fixtures.AllMatches {
-		match, ok := m.toAPI(resp.Details.ID, resp.Details.Name, resp.Details.Country, dateStr, wantLive, wantFinished)
+		match, ok := m.toAPI(resp.Details.ID.int(), resp.Details.Name, resp.Details.Country, from, to, wantLive, wantFinished)
 		if !ok {
 			continue
 		}
@@ -128,7 +136,9 @@ func (c *Client) LiveMatches(ctx context.Context) ([]api.Match, error) {
 }
 
 func (c *Client) FinishedMatches(ctx context.Context) ([]api.Match, error) {
-	all, err := c.MatchesForDate(ctx, time.Now(), false, true)
+	now := time.Now().UTC()
+	from := now.AddDate(0, 0, -finishedDaysBack)
+	all, err := c.MatchesInRange(ctx, from, now, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +148,15 @@ func (c *Client) FinishedMatches(ctx context.Context) ([]api.Match, error) {
 			finished = append(finished, m)
 		}
 	}
+	sort.Slice(finished, func(i, j int) bool {
+		if finished[i].MatchTime == nil {
+			return false
+		}
+		if finished[j].MatchTime == nil {
+			return true
+		}
+		return finished[i].MatchTime.After(*finished[j].MatchTime)
+	})
 	return finished, nil
 }
 
@@ -238,7 +257,7 @@ func parseTime(s string) (time.Time, error) {
 func scorePtr(v int) *int { return &v }
 
 type rawMatch struct {
-	ID     int `json:"id"`
+	ID     flexInt `json:"id"`
 	Home   rawTeam `json:"home"`
 	Away   rawTeam `json:"away"`
 	Status struct {
@@ -255,13 +274,18 @@ type rawMatch struct {
 }
 
 type rawTeam struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-	ShortName string `json:"shortName"`
-	Score *int  `json:"score"`
+	ID        flexInt `json:"id"`
+	Name      string  `json:"name"`
+	ShortName string  `json:"shortName"`
+	Score     *int    `json:"score"`
 }
 
-func (m rawMatch) toAPI(leagueID int, leagueName, country, dateStr string, wantLive, wantFinished bool) (api.Match, bool) {
+func utcDate(t time.Time) time.Time {
+	y, m, d := t.UTC().Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+func (m rawMatch) toAPI(leagueID int, leagueName, country string, from, to time.Time, wantLive, wantFinished bool) (api.Match, bool) {
 	if m.Status.UTCTime == "" {
 		return api.Match{}, false
 	}
@@ -270,7 +294,11 @@ func (m rawMatch) toAPI(leagueID int, leagueName, country, dateStr string, wantL
 	}
 
 	t, err := parseTime(m.Status.UTCTime)
-	if err != nil || t.UTC().Format("2006-01-02") != dateStr {
+	if err != nil {
+		return api.Match{}, false
+	}
+	matchDay := utcDate(t)
+	if matchDay.Before(utcDate(from)) || matchDay.After(utcDate(to)) {
 		return api.Match{}, false
 	}
 
@@ -298,15 +326,18 @@ func (m rawMatch) toAPI(leagueID int, leagueName, country, dateStr string, wantL
 	}
 
 	match := api.Match{
-		ID: m.ID,
+		ID: m.ID.int(),
 		League: api.League{ID: leagueID, Name: leagueName, Country: country},
-		HomeTeam: api.Team{ID: m.Home.ID, Name: m.Home.Name, ShortName: fallbackShort(m.Home.ShortName, m.Home.Name)},
-		AwayTeam: api.Team{ID: m.Away.ID, Name: m.Away.Name, ShortName: fallbackShort(m.Away.ShortName, m.Away.Name)},
+		HomeTeam: api.Team{ID: m.Home.ID.int(), Name: m.Home.Name, ShortName: fallbackShort(m.Home.ShortName, m.Home.Name)},
+		AwayTeam: api.Team{ID: m.Away.ID.int(), Name: m.Away.Name, ShortName: fallbackShort(m.Away.ShortName, m.Away.Name)},
 		Status: status,
 		HomeScore: m.Home.Score,
 		AwayScore: m.Away.Score,
 		MatchTime: &t,
 		PageURL: m.PageURL,
+	}
+	if match.HomeScore == nil && match.AwayScore == nil {
+		match.HomeScore, match.AwayScore = parseScoreStr(m.Status.ScoreStr)
 	}
 	if lt := strings.TrimSpace(m.Status.LiveTime.Short); lt != "" {
 		match.LiveTime = &lt
@@ -321,6 +352,20 @@ func fallbackShort(short, full string) string {
 	return full
 }
 
+func parseScoreStr(s string) (home, away *int) {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "-" {
+		return nil, nil
+	}
+	var h, a int
+	if _, err := fmt.Sscanf(s, "%d - %d", &h, &a); err != nil {
+		if _, err := fmt.Sscanf(s, "%d-%d", &h, &a); err != nil {
+			return nil, nil
+		}
+	}
+	return &h, &a
+}
+
 type rawMatchDetails struct {
 	General struct {
 		MatchID string `json:"matchId"`
@@ -329,7 +374,8 @@ type rawMatchDetails struct {
 		LeagueName string `json:"leagueName"`
 		Started bool `json:"started"`
 		Finished bool `json:"finished"`
-		MatchTimeUTC string `json:"matchTimeUTC"`
+		MatchTimeUTC     string `json:"matchTimeUTC"`
+		MatchTimeUTCDate string `json:"matchTimeUTCDate"`
 	} `json:"general"`
 	Header struct {
 		Teams []struct {
@@ -387,7 +433,9 @@ type rawMatchDetails struct {
 func (r rawMatchDetails) toAPI() *api.MatchDetails {
 	g := r.General
 	var matchTime *time.Time
-	if t, err := parseTime(g.MatchTimeUTC); err == nil {
+	if t, err := parseTime(g.MatchTimeUTCDate); err == nil {
+		matchTime = &t
+	} else if t, err := parseTime(g.MatchTimeUTC); err == nil {
 		matchTime = &t
 	}
 
@@ -399,17 +447,33 @@ func (r rawMatchDetails) toAPI() *api.MatchDetails {
 		status = api.MatchStatusLive
 	}
 
-	home := api.Team{ID: g.HomeTeam.ID, Name: g.HomeTeam.Name, ShortName: fallbackShort(g.HomeTeam.ShortName, g.HomeTeam.Name)}
-	away := api.Team{ID: g.AwayTeam.ID, Name: g.AwayTeam.Name, ShortName: fallbackShort(g.AwayTeam.ShortName, g.AwayTeam.Name)}
+	home := api.Team{ID: g.HomeTeam.ID.int(), Name: g.HomeTeam.Name, ShortName: fallbackShort(g.HomeTeam.ShortName, g.HomeTeam.Name)}
+	away := api.Team{ID: g.AwayTeam.ID.int(), Name: g.AwayTeam.Name, ShortName: fallbackShort(g.AwayTeam.ShortName, g.AwayTeam.Name)}
+
+	homeScore := g.HomeTeam.Score
+	awayScore := g.AwayTeam.Score
+	if len(r.Header.Teams) >= 2 {
+		homeScore = r.Header.Teams[0].Score
+		awayScore = r.Header.Teams[1].Score
+	}
+	if homeScore == nil && awayScore == nil {
+		homeScore, awayScore = parseScoreStr(r.Header.Status.ScoreStr)
+	}
+
+	matchID := 0
+	if id, err := strconv.Atoi(g.MatchID); err == nil {
+		matchID = id
+	}
 
 	d := &api.MatchDetails{
 		Match: api.Match{
+			ID: matchID,
 			League: api.League{Name: g.LeagueName},
 			HomeTeam: home,
 			AwayTeam: away,
 			Status: status,
-			HomeScore: g.HomeTeam.Score,
-			AwayScore: g.AwayTeam.Score,
+			HomeScore: homeScore,
+			AwayScore: awayScore,
 			MatchTime: matchTime,
 		},
 		Venue: r.Content.MatchFacts.InfoBox.Stadium.Name,

@@ -13,6 +13,7 @@ var DefaultLeagues = []api.League{
 	{ID: 54, Name: "Bundesliga", Country: "Germany"},
 	{ID: 55, Name: "Serie A", Country: "Italy"},
 	{ID: 53, Name: "Ligue 1", Country: "France"},
+	{ID: 77, Name: "FIFA World Cup", Country: "International"},
 }
 
 func LeagueIDs() []int {
@@ -53,7 +54,9 @@ func MockLiveMatches() []api.Match {
 }
 
 func MockFinishedMatches() []api.Match {
-	t := time.Now().UTC().Add(-3 * time.Hour)
+	today := time.Now().UTC().Add(-3 * time.Hour)
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Add(-2 * time.Hour)
+	twoDaysAgo := time.Now().UTC().AddDate(0, 0, -2).Add(-4 * time.Hour)
 	return []api.Match{
 		{
 			ID: 9003,
@@ -62,7 +65,7 @@ func MockFinishedMatches() []api.Match {
 			AwayTeam: api.Team{ID: 6, Name: "Dortmund", ShortName: "Dortmund"},
 			Status: api.MatchStatusFinished,
 			HomeScore: intPtr(3), AwayScore: intPtr(2),
-			MatchTime: &t,
+			MatchTime: &today,
 			PageURL: "/matches/bayern-vs-dortmund/mock9003",
 		},
 		{
@@ -72,8 +75,28 @@ func MockFinishedMatches() []api.Match {
 			AwayTeam: api.Team{ID: 8, Name: "Milan", ShortName: "Milan"},
 			Status: api.MatchStatusFinished,
 			HomeScore: intPtr(1), AwayScore: intPtr(1),
-			MatchTime: &t,
+			MatchTime: &today,
 			PageURL: "/matches/inter-vs-milan/mock9004",
+		},
+		{
+			ID: 9005,
+			League: api.League{ID: 77, Name: "FIFA World Cup", Country: "International"},
+			HomeTeam: api.Team{ID: 9, Name: "Mexico", ShortName: "Mexico"},
+			AwayTeam: api.Team{ID: 10, Name: "South Africa", ShortName: "South Africa"},
+			Status: api.MatchStatusFinished,
+			HomeScore: intPtr(2), AwayScore: intPtr(0),
+			MatchTime: &twoDaysAgo,
+			PageURL: "/matches/mexico-vs-south-africa/mock9005",
+		},
+		{
+			ID: 9006,
+			League: api.League{ID: 77, Name: "FIFA World Cup", Country: "International"},
+			HomeTeam: api.Team{ID: 11, Name: "South Korea", ShortName: "South Korea"},
+			AwayTeam: api.Team{ID: 12, Name: "Denmark", ShortName: "Denmark"},
+			Status: api.MatchStatusFinished,
+			HomeScore: intPtr(1), AwayScore: intPtr(0),
+			MatchTime: &yesterday,
+			PageURL: "/matches/south-korea-vs-denmark/mock9006",
 		},
 	}
 }

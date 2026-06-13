@@ -28,7 +28,7 @@ func fetchFinishedMatches(client *fotmob.Client, useMock bool) tea.Cmd {
 		if useMock {
 			return matchesMsg{matches: data.MockFinishedMatches()}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		matches, err := client.FinishedMatches(ctx)
 		return matchesMsg{matches: matches, err: err}

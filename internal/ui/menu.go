@@ -15,7 +15,7 @@ var (
 )
 
 func RenderMenu(width, height, selected int, mock bool, loading bool, sp spinner.Model) string {
-	items := []string{"Live Matches", "Finished Today", "World Cup 2026"}
+	items := []string{"Live Matches", "Recent Results", "World Cup 2026"}
 	var menu strings.Builder
 	for i, item := range items {
 		if i == selected {
